@@ -124,17 +124,30 @@ def compile_one(mod, name, out):
 
 
 def check_sdk(mod, name, path):
-    """Run the compiled kernel through the spyre_cli SDK and compare with CPU."""
+    """Run the compiled kernel through the spyre_cli SDK and compare with CPU.
+
+    By default the kernel gets the inputs then one output allocated with
+    ``torch.empty``. A suite whose kernel takes other tensors or a different
+    output layout defines ``sdk_launch(name, dev, path)``, which returns
+    ``(got, runner)``: the result read back to the host and the runner to keep
+    alive until then.
+    """
     import spyre_cli
     import torch
 
     ex = mod.EXAMPLES[name]
     inputs = mod.make_inputs(name)
     dev = device_inputs(mod, name, inputs)
-    out = torch.empty(ex.output, dtype=torch_dtype(ex.result_dtype), device="spyre")
+    launch = getattr(mod, "sdk_launch", None)
     try:
-        runner = spyre_cli.launch(*dev, out, path=path)
-        got = out.cpu()
+        if launch is not None:
+            got, runner = launch(name, dev, path)
+        else:
+            out = torch.empty(
+                ex.output, dtype=torch_dtype(ex.result_dtype), device="spyre"
+            )
+            runner = spyre_cli.launch(*dev, out, path=path)
+            got = out.cpu()
         del runner  # only after the outputs are read back
     except Exception as exc:  # noqa: BLE001  report it; the table would show "no result"
         return False, f"launch raised {type(exc).__name__}: {str(exc)[:500]}"

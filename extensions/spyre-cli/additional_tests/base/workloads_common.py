@@ -29,6 +29,11 @@ A suite is a folder ``additional_tests/<group>/<suite>/`` holding
                               exact checks beyond the tolerance comparison
     METRICS                   optional; {metric name: fn(mod, out, iters)} for the
                               throughput / format checks of the suite
+    sdk_launch(name, dev, path)
+                              optional; for kernels whose tensors or output layout
+                              ``spyre_cli.launch`` cannot take by default. Returns
+                              ``(got, runner)``: the result on the host and the
+                              runner, which the harness keeps alive until then
 
 Building and checking is done by ``check.py`` and driven, one process per
 example, by ``run_all.py``.

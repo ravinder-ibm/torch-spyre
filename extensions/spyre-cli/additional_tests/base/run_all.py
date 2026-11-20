@@ -222,6 +222,8 @@ def main():
             f"unknown suite or example: {' '.join(unknown)} "
             f"(suites: {' '.join(suites)})"
         )
+    if not chosen:
+        parser.error(f"no suites found in group {args.group!r}")
 
     if args.list:
         for suite, name in chosen:
