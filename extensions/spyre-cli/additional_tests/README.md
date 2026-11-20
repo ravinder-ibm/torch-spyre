@@ -13,11 +13,13 @@ additional_tests/
 │   ├── check.py                            compile_one, check_sdk, bench_one
 │   └── run_all.py                          runs every example, prints a summary table
 └── matrix-tensor-contraction-workloads/    a workload group
-    └── test_conv_ops.py                    WK-MAT-05 conv2d examples (standalone script)
+    └── test_conv_ops.py                    WK-MAT-05 conv2d examples (suite conv_ops)
 ```
 
-A **group** is a folder under `additional_tests/`. A **suite** is a folder inside a
-group that contains `<suite>_examples.py`. `run_all.py` discovers suites this way.
+A **group** is a folder under `additional_tests/`. A **suite** is either a folder
+inside a group that contains `<suite>_examples.py`, or a file `test_<suite>.py`
+directly in the group folder. `run_all.py` discovers suites both ways. The conv
+workload is the second kind: suite `conv_ops`, from `test_conv_ops.py`.
 
 ## Requirements
 
@@ -31,9 +33,39 @@ group that contains `<suite>_examples.py`. `run_all.py` discovers suites this wa
 export PYTHONPATH=/path/to/torch-spyre/extensions/spyre-cli
 ```
 
-## Running the conv workload
+## Running the conv workload with `run_all.py`
 
 Run from `additional_tests/`:
+
+```bash
+cd /home/ravindersinghrawat/fork-torch-spyre/torch-spyre/extensions/spyre-cli/additional_tests
+export PYTHONPATH=/home/ravindersinghrawat/fork-torch-spyre/torch-spyre/extensions/spyre-cli
+
+python ./base/run_all.py --group matrix-tensor-contraction-workloads --list
+python ./base/run_all.py --group matrix-tensor-contraction-workloads conv_dl16_test
+python ./base/run_all.py --group matrix-tensor-contraction-workloads
+```
+
+What each command does:
+
+- `--list`: prints every example in the group with its workload, case ID and
+  title. Examples marked `[xfail]` are expected not to compile. Nothing runs on
+  the device.
+- `... conv_dl16_test`: builds and checks one example. Use it first to confirm the
+  setup works.
+- `...` with no example names: builds and checks every example in the group, then
+  prints a summary table and `N/M examples as expected`. The exit status is 0 only
+  if every example is as expected.
+
+Both build and check run on the device. The check step launches each kernel
+through the `spyre_cli` Python SDK (`spyre_cli.launch`), not the `spyre` command.
+The build step prints a `spyre launch ...` line for information only; it does not
+run it. `PYTHONPATH` must point at the `spyre-cli` folder so `spyre_cli` can be
+imported.
+
+## Running the conv workload directly
+
+`test_conv_ops.py` can also be run on its own, without the harness:
 
 ```bash
 # Build (compile) every example; kernels go to matrix-tensor-contraction-workloads/build/
@@ -91,13 +123,14 @@ Each example runs in a fresh process, so a device fault in one example does not
 affect the others. The run exits with status 0 only if every selected example is
 as expected. If no suites are found in the group, it exits with an error.
 
-> **Current state:** `matrix-tensor-contraction-workloads` does not yet use the
-> suite layout (`<suite>/<suite>_examples.py`), so `run_all.py` finds no suites in
-> it. Run `test_conv_ops.py` directly for that workload until it is converted.
+> **Note:** `run_all.py` without `--group` uses the default group,
+> `precision-scaling-structured-sparsity-workloads`. That folder is not on every
+> branch, so it fails with "no suites found" if it is missing. Always pass `--group`.
 
 ## Writing a suite for `run_all.py`
 
-A suite module `<group>/<suite>/<suite>_examples.py` defines:
+A suite module, either `<group>/<suite>/<suite>_examples.py` or
+`<group>/test_<suite>.py`, defines:
 
 | Name | Required | Purpose |
 |---|---|---|

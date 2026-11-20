@@ -132,6 +132,7 @@ def _out_size(size, stride, padding):
 @dataclasses.dataclass(frozen=True)
 class Example:
     title: str
+    case: str  # test case id, shown in run_all.py's table
     dtype: str  # "fp16" (DL16), "bf16" or "int8"
     stride: int = 1
     padding: int = 1
@@ -178,16 +179,28 @@ class Example:
 
 EXAMPLES = {
     # Representative workload in each precision, random data vs CPU.
-    "conv_dl16_test": Example("Conv2d 64->128, 3x3 (DL16)", "fp16"),
-    "conv_test": Example("Conv2d 64->128, 3x3 (BF16)", "bf16"),
-    "conv_int8_test": Example("Conv2d 64->128, 3x3 (INT8)", "int8", xfail=_INT8_XFAIL),
+    "conv_dl16_test": Example("Conv2d 64->128, 3x3 (DL16)", "CONV-01", "fp16"),
+    "conv_test": Example("Conv2d 64->128, 3x3 (BF16)", "CONV-02", "bf16"),
+    "conv_int8_test": Example(
+        "Conv2d 64->128, 3x3 (INT8)", "CONV-03", "int8", xfail=_INT8_XFAIL
+    ),
     # Stride boundary integrity.
-    "conv_stride2_test": Example("Conv2d 64->128, 3x3, stride 2", "bf16", stride=2),
+    "conv_stride2_test": Example(
+        "Conv2d 64->128, 3x3, stride 2", "CONV-04", "bf16", stride=2
+    ),
     # Zero border artifacts: all-ones input, closed-form expected output.
-    "conv_border_dl16": Example("Zero border artifacts (DL16)", "fp16", init="ones"),
-    "conv_border_bf16": Example("Zero border artifacts (BF16)", "bf16", init="ones"),
+    "conv_border_dl16": Example(
+        "Zero border artifacts (DL16)", "CONV-05", "fp16", init="ones"
+    ),
+    "conv_border_bf16": Example(
+        "Zero border artifacts (BF16)", "CONV-06", "bf16", init="ones"
+    ),
     "conv_border_int8": Example(
-        "Zero border artifacts (INT8)", "int8", init="ones", xfail=_INT8_XFAIL
+        "Zero border artifacts (INT8)",
+        "CONV-07",
+        "int8",
+        init="ones",
+        xfail=_INT8_XFAIL,
     ),
 }
 
@@ -280,6 +293,11 @@ def make_inputs(name, seed=0):
     return [x.to(dtype), weight.to(dtype)]
 
 
+def op_fn(name):
+    """The torch callable the harness compiles for example ``name``."""
+    return conv_fn(name)
+
+
 def expected(name, inputs):
     """CPU result for ``inputs``.
 
@@ -353,13 +371,14 @@ def _compile_one(name, out):
     print(f"{name}: spyre launch {' '.join(cli_args(name))} {dest}")
 
 
-def launch_one(name, kernel_dir):
-    """Run the compiled kernel through the SDK and compare with the CPU.
+def sdk_launch(name, dev, path):
+    """Launch the compiled kernel through the SDK; return ``(got, runner)``.
 
     The four tensors are the ones the generated wrapper passes to ``.run``:
     activation, a scalar zero, weight, and the channel-last output (a plain
     ``torch.empty`` would get the default layout, which is not what the kernel
-    writes).
+    writes). ``got`` is the NCHW result read back to the host; keep ``runner``
+    alive until it has been read.
     """
     import torch
     import spyre_cli
@@ -369,8 +388,7 @@ def launch_one(name, kernel_dir):
     ex = EXAMPLES[name]
     dtype = torch_dtype(name)
     device = torch.device("spyre:0")
-    inputs = make_inputs(name)
-    x, weight = (t.to("spyre") for t in inputs)
+    x, weight = dev
     zero = spyre_constant_tensor(0, device, dtype)
 
     _, c_out, h_out, w_out = ex.output
@@ -386,9 +404,18 @@ def launch_one(name, kernel_dir):
         ),
         device=device,
     )
+    runner = spyre_cli.launch(x, zero, weight, out, path=path)
+    return out.cpu().permute(0, 3, 1, 2), runner  # channel-last -> NCHW
 
-    runner = spyre_cli.launch(x, zero, weight, out, path=kernel_dir)
-    got = out.cpu().permute(0, 3, 1, 2)  # channel-last storage -> NCHW
+
+def launch_one(name, kernel_dir):
+    """Run the compiled kernel through the SDK and compare with the CPU."""
+    import torch
+
+    ex = EXAMPLES[name]
+    inputs = make_inputs(name)
+    dev = [t.to("spyre") for t in inputs]
+    got, runner = sdk_launch(name, dev, kernel_dir)
     del runner  # only after the outputs are read back
     want = expected(name, inputs)
     diff = (got.float() - want.float()).abs()

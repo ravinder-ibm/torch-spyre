@@ -101,24 +101,36 @@ class Example:
 
 
 def suite_names(group=DEFAULT_GROUP):
-    """Names of the suites in ``additional_tests/<group>/``, sorted."""
+    """Names of the suites in ``additional_tests/<group>/``, sorted.
+
+    A suite is a folder ``<suite>/`` holding ``<suite>_examples.py``, or a file
+    ``test_<suite>.py`` directly in the group folder.
+    """
     folder = ADDITIONAL / group
     if not folder.is_dir():
         return []
-    return sorted(
+    names = {
         p.name for p in folder.iterdir() if (p / f"{p.name}_examples.py").is_file()
-    )
+    }
+    names |= {p.stem.removeprefix("test_") for p in folder.glob("test_*.py")}
+    return sorted(names)
 
 
 def suite_dir(suite, group=DEFAULT_GROUP):
     return ADDITIONAL / group / suite
 
 
+def suite_file(suite, group=DEFAULT_GROUP):
+    """The module that defines ``suite``; see :func:`suite_names`."""
+    nested = suite_dir(suite, group) / f"{suite}_examples.py"
+    return nested if nested.is_file() else ADDITIONAL / group / f"test_{suite}.py"
+
+
 def load_suite(suite, group=DEFAULT_GROUP):
-    """The module ``<group>/<suite>/<suite>_examples.py``."""
+    """The module defined by :func:`suite_file`."""
     key = f"{suite}_examples"
     if key not in sys.modules:
-        path = suite_dir(suite, group) / f"{key}.py"
+        path = suite_file(suite, group)
         spec = importlib.util.spec_from_file_location(key, path)
         module = importlib.util.module_from_spec(spec)
         sys.modules[key] = module
